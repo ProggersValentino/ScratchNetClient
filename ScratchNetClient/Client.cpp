@@ -71,9 +71,9 @@ void Client::ClientProcess()
 
         CompareSnapShot(clientSnap, dummySnap, changedVariables, changedValues);
 
-        Payload payloadToSend = *CreatePayload(changedVariables, changedValues);
+        Payload* payloadToSend = CreatePayload(changedVariables, changedValues);
 
-        SerializePayload(payloadToSend, transmitBuf);
+        SerializePayload(*payloadToSend, transmitBuf);
 
         int bytesSent = clientSock.Send(*sendAddress, &transmitBuf, sizeof(transmitBuf));
 
@@ -98,13 +98,15 @@ void Client::ClientProcess()
 
         changedValues.clear();
         changedVariables.clear();
+        
+        
 
         if (strcmp(transmitBuf, "q") == 0)
         {
             break;
         }
 
-        int recieveSize = 40;
+        int recieveSize = 13;
         Address* server = CreateAddress();
         int recievedFromServer = clientSock.Receive(*server, &receiveBuf, recieveSize);
 
@@ -118,6 +120,9 @@ void Client::ClientProcess()
 
             printf("deserialized float: %f", DeserializeFloat(recievedPayload.setChanges, 0));
         }
+
+        delete payloadToSend; //wipe the payload as we dont need it anymore
+
         
     }
 
