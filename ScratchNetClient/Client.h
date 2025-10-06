@@ -1,6 +1,7 @@
 #pragma once
 #include "Socket.h"
 #include "Snapshot.h"
+#include "ScratchAck.h"
 #include <unordered_map>
 
 class Client
@@ -13,6 +14,7 @@ public:
 private:
     std::unordered_map<int, Snapshot> networkedObjects;
 
+    ScratchAck* packetAckMaintence;
     Snapshot clientSnap;
     Socket clientSock;
 };

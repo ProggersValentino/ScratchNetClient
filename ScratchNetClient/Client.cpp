@@ -1,4 +1,5 @@
 #include "Client.h"
+#include "ScratchAck.h"
 
 #include <iostream>
 #include <thread>
@@ -17,9 +18,11 @@ void Client::ClientProcess()
 
     clientSnap = *CreateFilledSnapShot(62266, 0.f, 0.f, 0.f);
     
+    packetAckMaintence = GenerateScratchAck();
+
     //separate buffers to prevent mix ups and ensure there is a clear difference between what gets sent and what is retrieved from server
-    char transmitBuf[13];
-    char receiveBuf[13];
+    char transmitBuf[30];
+    char receiveBuf[30];
 
     
     strcpy_s(transmitBuf, "");
@@ -35,6 +38,7 @@ void Client::ClientProcess()
     ///this is a common approach and can lead into threadpooling methods 
     while (true)
     {
+        //SENDING PROCESS
         Snapshot dummySnap = *CreateEmptySnapShot();
 
         //updated position
@@ -71,9 +75,15 @@ void Client::ClientProcess()
 
         CompareSnapShot(clientSnap, dummySnap, changedVariables, changedValues);
 
+        ScratchPacketHeader* header = InitPacketHeaderWithoutCRC(packetAckMaintence->currentPacketSequence, packetAckMaintence->mostRecentRecievedPacket, 
+            packetAckMaintence->GetAckBits(packetAckMaintence->mostRecentRecievedPacket));
+
+        PacketData data = packetAckMaintence->InsertPacketData(packetAckMaintence->currentPacketSequence);
+        data.acked = false; //ensuring that when a packet gets assigned, the acked is always false
+
         Payload* payloadToSend = CreatePayload(changedVariables, changedValues);
 
-        SerializePayload(*payloadToSend, transmitBuf);
+        ConstructPacket(*header, *payloadToSend, transmitBuf); //combining the header and payload into one transmit buffer to send
 
         int bytesSent = clientSock.Send(*sendAddress, &transmitBuf, sizeof(transmitBuf));
 
@@ -82,46 +92,67 @@ void Client::ClientProcess()
             printf("Error sending message due to this error: %d\n", WSAGetLastError());
         }
 
-        /*if (std::cin.getline(transmitBuf, sizeof(transmitBuf)))
-        {
-            
 
-            int bytesSent = clientSock.Send(*sendAddress, transmitBuf, sizeof(transmitBuf));
-
-            if (bytesSent <= 0)
-            {
-                printf("Error sending message due to this error: %d\n", WSAGetLastError());
-            }
-        }*/
+        packetAckMaintence->IncrementPacketSequence(); //incrementing the current packet sequence by 1
 
         clientSnap = dummySnap;
 
         changedValues.clear();
         changedVariables.clear();
         
-        
+        delete payloadToSend; //wipe the payload as we dont need it anymore
+        delete header;
+        //
 
         if (strcmp(transmitBuf, "q") == 0)
         {
             break;
         }
 
-        int recieveSize = 13;
+        //RECIEVING PROCESS 
+        int recieveSize = 30;
         Address* server = CreateAddress();
         int recievedFromServer = clientSock.Receive(*server, &receiveBuf, recieveSize);
 
         if (recievedFromServer > 0)
         {
             printf("Recieved information from server: %s \n", receiveBuf);
+            ScratchPacketHeader* recvHeader = InitEmptyPacketHeader();
+
+            
 
             Payload recievedPayload = *CreateEmptyPayload();
 
-            DeserializePayload(receiveBuf, 40, recievedPayload);
+            DeconstructPacket(receiveBuf, *recvHeader, recievedPayload);
 
+            /*DeserializePayload(receiveBuf, 30, recievedPayload);*/
+
+            char tempbuf[15] = { 0 };
+            SerializePayload(recievedPayload, tempbuf);
+
+            if (!CompareCRC(*recvHeader, tempbuf))
+            {
+                return;
+            }
+
+            //packet maintence
+            packetAckMaintence->InsertRecievedSequenceIntoRecvBuffer(header->sequence); //insert sender's packet sequence into our local recv sequence buf
+
+            packetAckMaintence->OnPacketAcked(recvHeader->ack); //acknowledge the most recent packet that was recieved by the sender
+
+            packetAckMaintence->AcknowledgeAckbits(header->ack_bits, header->ack); //acknowledge the previous 32 packets starting from the most recent acknowledged from the sender
+
+            if(header->sequence < packetAckMaintence->mostRecentRecievedPacket) //is the packet's sequence we just recieved higher than our most recently recieved packet sequence?
+            {
+                packetAckMaintence->mostRecentRecievedPacket = header->sequence;
+                return;
+            }
+
+            //apply changes to clients here
             printf("deserialized float: %f", DeserializeFloat(recievedPayload.setChanges, 0));
         }
+        //
 
-        delete payloadToSend; //wipe the payload as we dont need it anymore
 
         
     }
