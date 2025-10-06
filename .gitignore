@@ -1,11 +1,8 @@
 *.ipch
 *.hint
 *.xml
-*.vcxproj.*
-*.vcxproj
-ScatchPacket/x64
+ScatchPacket/x64/Debug/*
+*.exe
+*.1.tlog
+*.tlog
 .vs
-x64/
-
-*.dll
-*.lib
