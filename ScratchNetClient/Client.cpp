@@ -21,8 +21,8 @@ void Client::ClientProcess()
     packetAckMaintence = GenerateScratchAck();
 
     //separate buffers to prevent mix ups and ensure there is a clear difference between what gets sent and what is retrieved from server
-    char transmitBuf[30];
-    char receiveBuf[30];
+    char transmitBuf[40];
+    char receiveBuf[40];
 
     
     strcpy_s(transmitBuf, "");
@@ -110,7 +110,7 @@ void Client::ClientProcess()
         }
 
         //RECIEVING PROCESS 
-        int recieveSize = 30;
+        int recieveSize = 40;
         Address* server = CreateAddress();
         int recievedFromServer = clientSock.Receive(*server, &receiveBuf, recieveSize);
 
@@ -127,24 +127,26 @@ void Client::ClientProcess()
 
             /*DeserializePayload(receiveBuf, 30, recievedPayload);*/
 
-            char tempbuf[15] = { 0 };
+            char tempbuf[40] = { 0 };
             SerializePayload(recievedPayload, tempbuf);
 
             if (!CompareCRC(*recvHeader, tempbuf))
             {
+                std::cout << "Failed CRC Check" << std::endl;
                 return;
             }
 
+            std::cout << "CRC Check Succeeded" << std::endl;
             //packet maintence
-            packetAckMaintence->InsertRecievedSequenceIntoRecvBuffer(header->sequence); //insert sender's packet sequence into our local recv sequence buf
+            packetAckMaintence->InsertRecievedSequenceIntoRecvBuffer(recvHeader->sequence); //insert sender's packet sequence into our local recv sequence buf
 
             packetAckMaintence->OnPacketAcked(recvHeader->ack); //acknowledge the most recent packet that was recieved by the sender
 
-            packetAckMaintence->AcknowledgeAckbits(header->ack_bits, header->ack); //acknowledge the previous 32 packets starting from the most recent acknowledged from the sender
+            packetAckMaintence->AcknowledgeAckbits(recvHeader->ack_bits, recvHeader->ack); //acknowledge the previous 32 packets starting from the most recent acknowledged from the sender
 
-            if(header->sequence < packetAckMaintence->mostRecentRecievedPacket) //is the packet's sequence we just recieved higher than our most recently recieved packet sequence?
+            if(recvHeader->sequence < packetAckMaintence->mostRecentRecievedPacket) //is the packet's sequence we just recieved higher than our most recently recieved packet sequence?
             {
-                packetAckMaintence->mostRecentRecievedPacket = header->sequence;
+                packetAckMaintence->mostRecentRecievedPacket = recvHeader->sequence;
                 return;
             }
 
