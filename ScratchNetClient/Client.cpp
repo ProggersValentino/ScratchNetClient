@@ -20,9 +20,17 @@ void Client::ClientProcess()
     
     packetAckMaintence = GenerateScratchAck();
 
+    Snapshot* initSnap = CreateFilledSnapShot(objectID, 0.f, 0.f, 0.f);
+
+    ssRecordKeeper = InitRecordKeeper();
+    ssRecordKeeper->InsertNewRecord(0, *initSnap); 
+
+    delete initSnap;
+
+
     //separate buffers to prevent mix ups and ensure there is a clear difference between what gets sent and what is retrieved from server
-    char transmitBuf[40];
-    char receiveBuf[40];
+    char transmitBuf[30];
+    char receiveBuf[30];
 
     
     strcpy_s(transmitBuf, "");
@@ -40,6 +48,7 @@ void Client::ClientProcess()
     {
         //SENDING PROCESS
         Snapshot dummySnap = *CreateEmptySnapShot();
+        
 
         //updated position
         std::cout << "New Position X: " << std::endl;
@@ -75,13 +84,14 @@ void Client::ClientProcess()
 
         CompareSnapShot(clientSnap, dummySnap, changedVariables, changedValues);
 
-        ScratchPacketHeader* header = InitPacketHeaderWithoutCRC(packetAckMaintence->currentPacketSequence, packetAckMaintence->mostRecentRecievedPacket, 
+        //create header
+        ScratchPacketHeader* header = InitPacketHeaderWithoutCRC(11, ssRecordKeeper->baselineRecord.packetSequence, packetAckMaintence->currentPacketSequence, packetAckMaintence->mostRecentRecievedPacket,
             packetAckMaintence->GetAckBits(packetAckMaintence->mostRecentRecievedPacket));
 
         PacketData data = packetAckMaintence->InsertPacketData(packetAckMaintence->currentPacketSequence);
         data.acked = false; //ensuring that when a packet gets assigned, the acked is always false
 
-        Payload* payloadToSend = CreatePayload(changedVariables, changedValues);
+        Payload* payloadToSend = CreatePayload(objectID, changedVariables, changedValues);
 
         ConstructPacket(*header, *payloadToSend, transmitBuf); //combining the header and payload into one transmit buffer to send
 
@@ -96,6 +106,7 @@ void Client::ClientProcess()
         packetAckMaintence->IncrementPacketSequence(); //incrementing the current packet sequence by 1
 
         clientSnap = dummySnap;
+        ssRecordKeeper->InsertNewRecord(header->sequence, dummySnap); //keeping record of the most recent snapshot
 
         changedValues.clear();
         changedVariables.clear();
@@ -110,7 +121,7 @@ void Client::ClientProcess()
         }
 
         //RECIEVING PROCESS 
-        int recieveSize = 40;
+        int recieveSize = 30;
         Address* server = CreateAddress();
         int recievedFromServer = clientSock.Receive(*server, &receiveBuf, recieveSize);
 
@@ -127,13 +138,13 @@ void Client::ClientProcess()
 
             /*DeserializePayload(receiveBuf, 30, recievedPayload);*/
 
-            char tempbuf[40] = { 0 };
+            char tempbuf[13] = { 0 };
             SerializePayload(recievedPayload, tempbuf);
 
-            if (!CompareCRC(*recvHeader, tempbuf))
+            if (!CompareCRC(*recvHeader, tempbuf, 13))
             {
                 std::cout << "Failed CRC Check" << std::endl;
-                return;
+                continue;
             }
 
             std::cout << "CRC Check Succeeded" << std::endl;
@@ -147,10 +158,28 @@ void Client::ClientProcess()
             if(recvHeader->sequence < packetAckMaintence->mostRecentRecievedPacket) //is the packet's sequence we just recieved higher than our most recently recieved packet sequence?
             {
                 packetAckMaintence->mostRecentRecievedPacket = recvHeader->sequence;
-                return;
+                continue;
             }
 
+            packetAckMaintence->mostRecentRecievedPacket = recvHeader->sequence;
             //apply changes to clients here
+
+            switch (recvHeader->packetCode)
+            {
+            case 11://payload specifically
+                
+                break;
+            case 12:
+
+                break;
+            case 21://ACK specifically
+
+                break;
+            case 22:
+
+                break;
+            }
+
             printf("deserialized float: %f", DeserializeFloat(recievedPayload.setChanges, 0));
         }
         //

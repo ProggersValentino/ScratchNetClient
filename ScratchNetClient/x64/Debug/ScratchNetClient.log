@@ -4,4 +4,6 @@ C:\LibraryProjects\ScratchPacketLibrary\ScratchPacket\Payload.h(26,20): warning 
       C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include\vector(442,7):
       see declaration of 'std::vector<char,std::allocator<char>>'
   
+  ScratchNetClient.cpp
+  Generating Code...
   ScratchNetClient.vcxproj -> C:\ApplicationProjects\ScratchNetClient\x64\Debug\ScratchNetClient.exe
