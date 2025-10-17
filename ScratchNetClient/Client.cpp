@@ -13,10 +13,12 @@ void Client::InitSockets(unsigned short int port, bool isBound)
 
 void Client::ClientProcess()
 {
+    objectID = generateObjectID();
+
     clientSock = *RetrieveSocket();
     clientSock.OpenSock(30000, false);
 
-    clientSnap = *CreateFilledSnapShot(62266, 0.f, 0.f, 0.f);
+    clientSnap = *CreateFilledSnapShot(objectID, 0.f, 0.f, 0.f);
     
     packetAckMaintence = GenerateScratchAck();
 
@@ -29,8 +31,8 @@ void Client::ClientProcess()
 
 
     //separate buffers to prevent mix ups and ensure there is a clear difference between what gets sent and what is retrieved from server
-    char transmitBuf[30];
-    char receiveBuf[30];
+    char transmitBuf[40] = { 0 };
+    char receiveBuf[40] = { 0 };
 
     
     strcpy_s(transmitBuf, "");
@@ -47,8 +49,8 @@ void Client::ClientProcess()
     while (true)
     {
         //SENDING PROCESS
-        Snapshot dummySnap = *CreateEmptySnapShot();
-        
+        Snapshot* dummySnap = CreateEmptySnapShot();
+        dummySnap->objectId = objectID;
 
         //updated position
         std::cout << "New Position X: " << std::endl;
@@ -57,7 +59,7 @@ void Client::ClientProcess()
 
         std::cin >> x;
 
-        dummySnap.posX = x;
+        dummySnap->posX = x;
 
         std::cout << '\n' << std::endl;
 
@@ -67,7 +69,7 @@ void Client::ClientProcess()
 
         std::cin >> y;
 
-        dummySnap.posY = y;
+        dummySnap->posY = y;
 
         std::cout << '\n' << std::endl;
 
@@ -78,11 +80,11 @@ void Client::ClientProcess()
 
         std::cin >> z;
 
-        dummySnap.posZ = z;
+        dummySnap->posZ = z;
 
         std::cout << '\n' << std::endl;
 
-        CompareSnapShot(clientSnap, dummySnap, changedVariables, changedValues);
+        CompareSnapShot(*ssRecordKeeper->baselineRecord.recordedSnapshot, *dummySnap, changedVariables, changedValues);
 
         //create header
         ScratchPacketHeader* header = InitPacketHeaderWithoutCRC(11, ssRecordKeeper->baselineRecord.packetSequence, packetAckMaintence->currentPacketSequence, packetAckMaintence->mostRecentRecievedPacket,
@@ -105,14 +107,13 @@ void Client::ClientProcess()
 
         packetAckMaintence->IncrementPacketSequence(); //incrementing the current packet sequence by 1
 
-        clientSnap = dummySnap;
-        ssRecordKeeper->InsertNewRecord(header->sequence, dummySnap); //keeping record of the most recent snapshot
+        //clientSnap = dummySnap;
+        //ssRecordKeeper->InsertNewRecord(header->sequence, dummySnap); //keeping record of the most recent snapshot
 
         changedValues.clear();
         changedVariables.clear();
+        delete dummySnap;
         
-        delete payloadToSend; //wipe the payload as we dont need it anymore
-        delete header;
         //
 
         if (strcmp(transmitBuf, "q") == 0)
@@ -121,7 +122,7 @@ void Client::ClientProcess()
         }
 
         //RECIEVING PROCESS 
-        int recieveSize = 30;
+        int recieveSize = 40;
         Address* server = CreateAddress();
         int recievedFromServer = clientSock.Receive(*server, &receiveBuf, recieveSize);
 
@@ -138,10 +139,10 @@ void Client::ClientProcess()
 
             /*DeserializePayload(receiveBuf, 30, recievedPayload);*/
 
-            char tempbuf[13] = { 0 };
+            char tempbuf[17] = { 0 };
             SerializePayload(recievedPayload, tempbuf);
 
-            if (!CompareCRC(*recvHeader, tempbuf, 13))
+            if (!CompareCRC(*recvHeader, tempbuf, 17))
             {
                 std::cout << "Failed CRC Check" << std::endl;
                 continue;
@@ -164,23 +165,59 @@ void Client::ClientProcess()
             packetAckMaintence->mostRecentRecievedPacket = recvHeader->sequence;
             //apply changes to clients here
 
+            Snapshot* extractedChanges = new Snapshot();
+            Snapshot* newBaseline = new Snapshot();
+
+            //how will we deconstruct the packet and who will we apply it to
             switch (recvHeader->packetCode)
             {
             case 11://payload specifically
+                extractedChanges = DeconstructRelativePayload(recievedPayload);
                 
-                break;
-            case 12:
+                if (extractedChanges->objectId == ssRecordKeeper->baselineRecord.recordedSnapshot->objectId) //we dont wnat to change the client's object htta is reserved for the heartbeat sent from server
+                {
+                    break;
+                }
 
+                newBaseline = ApplyChangesToSnapshot(*ssRecordKeeper->baselineRecord.recordedSnapshot, *extractedChanges);
+
+                UpdateNetworkedObject(*newBaseline);
+                printf("object: %d has updated to: %f %f %f", newBaseline->objectId, newBaseline->posX, newBaseline->posY, newBaseline->posZ);
+
+                break;
+            case 12: //outright apply change to object
+                extractedChanges = DeconstructAbsolutePayload(recievedPayload);
+
+                if (extractedChanges->objectId == ssRecordKeeper->baselineRecord.recordedSnapshot->objectId) //we dont wnat to change the client's object htta is reserved for the heartbeat sent from server
+                {
+                    break;
+                }
+                UpdateNetworkedObject(*extractedChanges);
+                printf("object: %d has updated to: %f %f %f", extractedChanges->objectId, extractedChanges->posX, extractedChanges->posY, extractedChanges->posZ);
                 break;
             case 21://ACK specifically
 
+                
+
                 break;
-            case 22:
+            case 22: //update the client's baseline snapshot which will be the movement 
+                extractedChanges = DeconstructAbsolutePayload(recievedPayload);
+                ssRecordKeeper->InsertNewRecord(recvHeader->sequence, *extractedChanges);
+                UpdateNetworkedObject(*extractedChanges);
+
+                printf("object: %d has updated to: %f %f %f", extractedChanges->objectId, extractedChanges->posX, extractedChanges->posY, extractedChanges->posZ);
 
                 break;
             }
 
-            printf("deserialized float: %f", DeserializeFloat(recievedPayload.setChanges, 0));
+            
+            
+            delete extractedChanges;
+            delete newBaseline;
+            delete recvHeader;
+            delete payloadToSend; //wipe the payload as we dont need it anymore
+            delete header;
+
         }
         //
 
@@ -209,4 +246,35 @@ void Client::ClientListen(void* recieveBuf)
         printf("deserialized float: %f", DeserializeFloat(recievedPayload.setChanges, 0));
     }
    
+}
+
+void Client::UpdateNetworkedObject(Snapshot changesToBeMade)
+{
+    
+    if (!nom.TryUpdatingNetworkedObject(changesToBeMade))
+    {
+        nom.TryInsertNewNetworkObject(changesToBeMade);
+    }
+}
+
+int Client::generateObjectID()
+{
+    std::random_device rd;
+
+    // seed value designed specifically to be different across app executions
+    std::mt19937::result_type seed = rd() ^ (
+        (std::mt19937::result_type)
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()
+        ).count() +
+        (std::mt19937::result_type)
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::high_resolution_clock::now().time_since_epoch()
+        ).count());
+
+    std::mt19937 gen(seed);
+    std::uniform_int_distribution<int> dist(0, INT_MAX);
+
+
+    return dist(gen); //random number generated
 }
