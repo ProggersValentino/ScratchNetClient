@@ -12,6 +12,8 @@
 class Client
 {
 public:
+    Client();
+
     void InitSockets(unsigned short int port, bool isBound);
     void ClientProcess();
     void ClientListen(void* recieveBuf);

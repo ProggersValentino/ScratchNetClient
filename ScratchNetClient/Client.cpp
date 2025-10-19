@@ -6,6 +6,15 @@
 #include <Payload.h>
 #include <PacketSerialization.h>
 
+const int safetyBuffer = 32;
+const int packetSize = 55;
+const int totalPacketSize = packetSize + safetyBuffer;
+
+Client::Client()
+{
+
+}
+
 void Client::InitSockets(unsigned short int port, bool isBound)
 {
     clientSock.OpenSock(port, isBound);
@@ -25,14 +34,14 @@ void Client::ClientProcess()
     Snapshot* initSnap = CreateFilledSnapShot(objectID, 0.f, 0.f, 0.f);
 
     ssRecordKeeper = InitRecordKeeper();
-    ssRecordKeeper->InsertNewRecord(0, *initSnap); 
+    ssRecordKeeper->InsertNewRecord(0, *initSnap); //inserting default baseline
 
     delete initSnap;
 
 
     //separate buffers to prevent mix ups and ensure there is a clear difference between what gets sent and what is retrieved from server
-    char transmitBuf[40] = { 0 };
-    char receiveBuf[40] = { 0 };
+    char transmitBuf[totalPacketSize] = { 0 };
+    char receiveBuf[totalPacketSize] = { 0 };
 
     
     strcpy_s(transmitBuf, "");
@@ -122,7 +131,7 @@ void Client::ClientProcess()
         }
 
         //RECIEVING PROCESS 
-        int recieveSize = 40;
+        int recieveSize = totalPacketSize;
         Address* server = CreateAddress();
         int recievedFromServer = clientSock.Receive(*server, &receiveBuf, recieveSize);
 
@@ -138,11 +147,11 @@ void Client::ClientProcess()
             DeconstructPacket(receiveBuf, *recvHeader, recievedPayload);
 
             /*DeserializePayload(receiveBuf, 30, recievedPayload);*/
-
-            char tempbuf[17] = { 0 };
+            const int tpSize = 17 + safetyBuffer;
+            char tempbuf[tpSize] = { 0 };
             SerializePayload(recievedPayload, tempbuf);
 
-            if (!CompareCRC(*recvHeader, tempbuf, 17))
+            if (!CompareCRC(*recvHeader, tempbuf, tpSize))
             {
                 std::cout << "Failed CRC Check" << std::endl;
                 continue;
@@ -231,7 +240,7 @@ void Client::ClientProcess()
 
 void Client::ClientListen(void* recieveBuf)
 {
-    int recieveSize = 40;
+    int recieveSize = totalPacketSize;
     Address* server = CreateAddress();
     int recievedFromServer = clientSock.Receive(*server, recieveBuf, recieveSize);
 
